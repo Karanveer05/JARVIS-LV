@@ -36,6 +36,11 @@ DEFAULT_VALUE = ""
 
 _cache: dict[str, list[str]] | None = None
 _cache_lock = threading.Lock()
+# _query() opens a real stream on every candidate device. Two of them running at
+# once (the startup prefetch and the picker opening before it lands) fight over
+# the same hardware, so a device that is perfectly fine fails to open and drops
+# out of the list. One enumeration at a time; the second waits and reuses it.
+_query_lock = threading.Lock()
 
 # Which host API each direction settled on, so resolve() opens the same endpoint
 # the picker listed. Filled in by _query().
@@ -319,14 +324,52 @@ def _query() -> dict[str, list[str]]:
     return out
 
 
+def reinit() -> None:
+    """Restart PortAudio so it re-reads the devices Windows currently has.
+
+    PortAudio snapshots the device list when it starts. A Bluetooth headset that
+    was mid-switch between music and call mode at that moment is recorded as
+    broken — no default input (index -1), the saved device unopenable — and
+    stays that way for the life of the process, so reconnecting in a loop only
+    ever repeats the same failure. Re-initialising is the one thing that fixes it.
+
+    Any stream open at the time is invalidated; call it only after a failure."""
+    global _cache
+    try:
+        import sounddevice as sd
+        sd._terminate()
+        sd._initialize()
+    except Exception as e:
+        print(f"[Audio] PortAudio re-init failed: {e}")
+    with _cache_lock:
+        _cache = None
+
+
+def any_usable(kind: str):
+    """Index of the first device that opens at this side's rate, or None.
+
+    Last resort for when neither the saved device nor the system default works:
+    a PC with a built-in mic should never end up deaf because of a headset."""
+    try:
+        import sounddevice as sd
+        chan = "max_input_channels" if kind == "input" else "max_output_channels"
+        for idx, dev in enumerate(sd.query_devices()):
+            if dev.get(chan, 0) > 0 and _usable(idx, kind):
+                return idx
+    except Exception:
+        pass
+    return None
+
+
 def prefetch() -> None:
     """Warm the cache on a background thread. Called once at startup so the
     settings drawer never pays for enumeration on the Qt thread."""
     def _work():
         global _cache
-        result = _query()
-        with _cache_lock:
-            _cache = result
+        with _query_lock:
+            result = _query()
+            with _cache_lock:
+                _cache = result
         print(f"[Audio] {len(result['input'])} input / "
               f"{len(result['output'])} output devices found")
     threading.Thread(target=_work, daemon=True, name="audio-devices").start()
@@ -339,9 +382,13 @@ def list_devices(kind: str, refresh: bool = False) -> list[str]:
     with _cache_lock:
         cached = None if refresh else _cache
     if cached is None:
-        cached = _query()
-        with _cache_lock:
-            _cache = cached
+        with _query_lock:
+            with _cache_lock:
+                cached = None if refresh else _cache      # a prefetch may have landed while we waited
+            if cached is None:
+                cached = _query()
+                with _cache_lock:
+                    _cache = cached
     return list(cached.get(kind, []))
 
 

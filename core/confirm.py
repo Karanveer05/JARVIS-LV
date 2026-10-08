@@ -79,6 +79,21 @@ def _log(msg: str) -> None:
             pass
 
 
+def _always_confirmed(key: str) -> bool:
+    """Things the user is asked about even with confirmations switched off: quitting JARVIS (a misheard goodbye
+    must not close it) and installing software (it runs code from outside, with the user's permissions)."""
+    return key == "shutdown_jarvis" or key.startswith("pip_install")
+
+
+def _enabled() -> bool:
+    """Is the confirmation gate switched on in Settings? Defaults to on if the setting cannot be read."""
+    try:
+        from memory.config_manager import get_confirm_risky
+        return get_confirm_risky()
+    except Exception:
+        return True
+
+
 def request(key: str, title: str, detail: str, run: Callable[[], str]) -> str:
     """Park an irreversible action behind the on-screen gate.
 
@@ -86,6 +101,20 @@ def request(key: str, title: str, detail: str, run: Callable[[], str]) -> str:
     instruction so the assistant asks the user out loud in their own language,
     rather than reading an English string verbatim."""
     global _pending
+
+    # The user can switch confirmations off in Settings. Then the action simply runs — except
+    # quitting JARVIS itself, which stays gated because a misheard "goodbye" must never be able
+    # to close the app (and the floating robot) without a human saying yes.
+    if not _always_confirmed(key) and not _enabled():
+        def _worker_now():
+            try:
+                _log(f"SYS: {run() or 'Done.'}  (confirmations are off)")
+            except Exception as e:
+                _log(f"ERR: {title} failed — {e}")
+        threading.Thread(target=_worker_now, daemon=True, name=f"nogate-{key}").start()
+        return (f"[CONFIRMATIONS_OFF] The user has turned confirmations off in Settings, so '{title}' is being "
+                f"done right now with no on-screen question. Say ONE short sentence in the user's own language "
+                f"that you are doing it. Do not ask them to confirm anything.")
 
     if _show_cb is None:
         # No interface bound (headless, or a very early call). Refuse rather

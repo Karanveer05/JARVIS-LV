@@ -75,6 +75,10 @@ class PluginRegistry:
                 decls.append(decl)
         return decls
 
+    def names(self) -> set[str]:
+        """Names of every valid plugin tool (used to keep new tools from colliding)."""
+        return set(self._plugins)
+
     def has(self, name: str) -> bool:
         return name in self._plugins
 

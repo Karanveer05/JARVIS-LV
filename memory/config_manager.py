@@ -104,6 +104,156 @@ def save_voice(voice_name: str) -> None:
     CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
 
 
+# How the assistant talks. The key is what is stored and what the user can say; the
+# label is shown in Settings; the instruction is added to the model's prompt. A
+# personality changes tone and wording only — never facts, tool use or safety.
+PERSONALITIES = {
+    "default": ("Default — polite butler",
+                "Speak like a polished, courteous butler-style assistant: calm, concise and respectful."),
+    "professional": ("Professional",
+                     "Be formal, precise and businesslike. Short, well-structured sentences, no slang, no jokes, "
+                     "no exclamation marks. Sound like a competent executive assistant."),
+    "casual": ("Casual — like a friend",
+               "Talk like a relaxed friend: informal, contractions, everyday words, light slang. Keep it short and easy-going."),
+    "funny": ("Funny — humorous",
+              "Be witty and playful. Work a quick joke, pun or silly aside into most replies, but never at the cost "
+              "of actually doing the task or giving a correct answer."),
+    "grumpy": ("Grumpy — angry",
+               "Play a grumpy, short-tempered assistant: huffy, sighing, dramatically annoyed at being bothered, "
+               "complaining out loud — but you ALWAYS do the task and give correct answers. Comic grumpiness only: "
+               "never genuinely insulting, never cruel, no swearing."),
+    "sarcastic": ("Sarcastic",
+                  "Use dry, deadpan sarcasm and gentle teasing. Stay good-natured, never mean, and always get the job done."),
+    "friendly": ("Friendly — warm",
+                 "Be warm, upbeat and encouraging, like a kind helper who is genuinely glad to be asked. Celebrate small wins."),
+    "calm": ("Calm — zen",
+             "Be slow, soothing and reassuring. Gentle wording, no rush, no drama — like a mindfulness guide."),
+    "hype": ("Hype — energetic",
+             "Be high-energy and enthusiastic, like an upbeat sports commentator. Short punchy lines, lots of positive energy."),
+}
+DEFAULT_PERSONALITY = "default"
+
+
+def normalize_personality(name: str) -> str:
+    """'Funny', 'angry', 'be casual' -> a valid key. Unknown names fall back to the default."""
+    n = (name or "").strip().lower()
+    aliases = {"angry": "grumpy", "mad": "grumpy", "annoyed": "grumpy", "humor": "funny", "humour": "funny",
+               "humorous": "funny", "joke": "funny", "jokey": "funny", "formal": "professional", "business": "professional",
+               "chill": "casual", "relaxed": "casual", "normal": "default", "butler": "default", "jarvis": "default",
+               "nice": "friendly", "warm": "friendly", "zen": "calm", "soothing": "calm", "energetic": "hype",
+               "excited": "hype", "sassy": "sarcastic"}
+    if n in PERSONALITIES:
+        return n
+    if n in aliases:
+        return aliases[n]
+    for key in list(PERSONALITIES) + list(aliases):          # "be more casual", "funny mode"
+        if key in n:
+            return aliases.get(key, key)
+    return DEFAULT_PERSONALITY
+
+
+def get_personality() -> str:
+    return normalize_personality(load_api_keys().get("personality", DEFAULT_PERSONALITY))
+
+
+def personality_instruction(name: str = "") -> str:
+    key = normalize_personality(name or get_personality())
+    return PERSONALITIES[key][1]
+
+
+def save_personality(name: str) -> str:
+    """Persist the chosen personality; returns the key actually stored."""
+    ensure_config_dir()
+    data: dict = {}
+    if CONFIG_FILE.exists():
+        try:
+            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+    key = normalize_personality(name)
+    data["personality"] = key
+    CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
+    return key
+
+
+def _save_flag(key: str, value: bool) -> None:
+    ensure_config_dir()
+    data: dict = {}
+    if CONFIG_FILE.exists():
+        try:
+            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+    data[key] = bool(value)
+    CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
+
+
+def get_confirm_risky() -> bool:
+    """Ask for a CONFIRM press before risky actions (restart, shutdown, stopping programs, new tools…).
+    On by default — switching it off means those run as soon as they are asked for."""
+    return bool(load_api_keys().get("confirm_risky", True))
+
+
+def save_confirm_risky(on: bool) -> None:
+    _save_flag("confirm_risky", on)
+
+
+def get_dark_mode() -> bool:
+    return bool(load_api_keys().get("dark_mode", False))
+
+
+def save_dark_mode(on: bool) -> None:
+    _save_flag("dark_mode", on)
+
+
+# ── Self-improvement: one master switch, five parts ─────────────────────────────────────────────
+# memory       remember facts about the user (and write the end-of-chat summary)
+# tools        write new tools (plugins) when asked for something no tool can do
+# corrections  save a short "lesson" when the user corrects it, and follow it from then on
+# routines     notice what the user does at the same time most days, and offer it
+# packages     install a missing Python package a new tool needs (from an approved list, after CONFIRM)
+# The master switch is on by default, and of the parts only `memory` starts on — that is how JARVIS has always
+# behaved. Switching the master off turns every part off at once. Switching a part off stops it ADDING
+# anything; what was already saved stays and is still used.
+SI_PARTS = ("memory", "tools", "corrections", "routines", "packages")
+_SI_DEFAULTS = {"memory": True, "tools": False, "corrections": False, "routines": False, "packages": False}
+
+
+def get_si_master() -> bool:
+    return bool(load_api_keys().get("si_master", True))
+
+
+def save_si_master(on: bool) -> None:
+    _save_flag("si_master", on)
+
+
+def get_si_flag(part: str) -> bool:
+    """The part's own switch, whatever the master says (what the Settings page shows)."""
+    cfg = load_api_keys()
+    if part == "tools" and "si_tools" not in cfg:
+        return bool(cfg.get("self_improve", False))            # the switch this feature had before it grew parts
+    return bool(cfg.get(f"si_{part}", _SI_DEFAULTS.get(part, False)))
+
+
+def get_si(part: str) -> bool:
+    """Is this part actually active? The master switch AND the part's own switch."""
+    return get_si_master() and get_si_flag(part)
+
+
+def save_si(part: str, on: bool) -> None:
+    if part in SI_PARTS:
+        _save_flag(f"si_{part}", on)
+
+
+def get_self_improve() -> bool:
+    """Writing new tools (kept under its old name)."""
+    return get_si("tools")
+
+
+def save_self_improve(on: bool) -> None:
+    save_si("tools", on)
+
+
 def get_wake_word_enabled() -> bool:
     """Whether local wake-word gating is on (assistant sleeps until 'Hey Jarvis')."""
     return load_api_keys().get("wake_word_enabled", False)

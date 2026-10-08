@@ -7,6 +7,44 @@ A real-time voice AI that can hear, see, speak, and control your computer — on
 
 ---
 
+## 🛠️ About this build (JARVIS-LV)
+
+This repository is Mark LV by FatihMakes, extended for a semester training project. On top of the original it adds:
+
+| Addition | What it does |
+|---|---|
+| **Offline assistant** | With no internet (or when every Gemini model is rate-limited) a small rule-based assistant takes over: open/close apps, time, timers, notes, maths, volume/brightness, screenshots, battery/CPU/disk, and answers from your saved history. Speech uses Whisper (if cached) or the Vosk model in `models/vosk`. Windows only. |
+| **Floating robot + chat window** | The default interface (`ui_chat.py`). Click the robot to chat; the ✕ button in the top-right closes JARVIS, `–` hides it back to the robot. Set `"ui_mode": "classic"` in `config/api_keys.json` for the old HUD. |
+| **21 extra tools** | calculator, notes, timer, shell_command, process_manager, system_toggles, spotify, powerpoint, image_generate, logins (encrypted vault), clipboard_history, file_tools, network_tools, screenshot, daily_briefing, everyday, site_to_file, personality, lessons, routines, tool_builder. 46 tools in total. |
+| **Self-improvement switches** | Remember facts, learn from corrections, notice routines, build new tools, install approved packages. Everything except "remember facts" is off by default. |
+| **Real confirmation** | Shutdown, restart, Wi-Fi off, stopping programs, non-read-only shell commands, quitting and package installs wait for a button only you can press. |
+| **English start-up greeting** | The launch greeting and headline are always in English; after that it follows the language you speak. |
+| **Portable installer** | One file, `JARVIS-Setup.exe`, that installs JARVIS on another Windows PC with no personal data (see below). |
+
+### 📦 Moving JARVIS to another PC (portable installer)
+
+Build it once on your PC:
+
+```bash
+python portable/build_installer.py       # writes dist/JARVIS-Setup.exe (about 41 MB)
+```
+
+Copy `JARVIS-Setup.exe` to the other PC and double-click it. Windows SmartScreen may say "unknown publisher" because the file is not code-signed: choose **More info → Run anyway**. The installer:
+
+1. copies the program to `%LOCALAPPDATA%\JARVIS` (no administrator rights),
+2. finds Python 3.11–3.13, or installs 3.12 with winget,
+3. creates a private virtual environment and installs the libraries (internet needed, several minutes),
+4. adds Desktop and Start-menu shortcuts and an **Uninstall JARVIS** entry,
+5. on first launch asks that person for their own Gemini API key.
+
+**What is never packed:** `config/api_keys.json` (key and settings), `memory/*.json` (chats, facts, notes, lessons, routines, offline history), the login vault, WhatsApp/Google sessions, AI-built plugins, caches and git history. The build uses an allow-list, refuses to run if a forbidden file slips in, and searches every packed file for your API key and account name before it writes the installer. The offline speech model (`models/vosk`) *is* included so offline mode works on the new PC.
+
+Re-running the installer on a PC that already has JARVIS updates the program and keeps that PC's saved key and chats.
+
+> The full install (library download, winget, shortcuts) has been tested only in part: unpack, icon and first-run screen. Run it once on a spare PC before relying on it.
+
+---
+
 ## ✨ Overview
 
 Mark LIV gave the assistant a face. **Mark LV gives it a screen — and the stamina to keep working when a model goes down.**
@@ -71,7 +109,6 @@ It's not just an assistant — it's an extension of your digital life.
 | 📨 Send Message | Compose and send messages through WhatsApp, Telegram, and more |
 | 🖱️ Desktop Control | Taskbar, window management, and desktop-level operations |
 | 🧑‍💻 Silent Language Memory | Detects spoken language on first use — all future sessions adapt automatically |
-| 📱 Remote Dashboard | Control the assistant from your phone via QR code pairing |
 | ⚡ Auto-Start on Boot | Registers with the OS startup system (registry / LaunchAgent / .desktop) |
 | 📋 Clipboard Intelligence | Copy any text → floating panel with Translate / Summarise / Explain / Fix |
 | 🪪 Assistant Customization | Change the assistant name, your name, voice, and colour from the UI — takes effect immediately |
@@ -100,7 +137,7 @@ So there are two players running together, with a timer that corrects any drift 
 The microphone is open while a video plays, so the moment you turn the sound on, JARVIS starts answering the film. The mic now mutes itself when the video's sound goes on and unmutes when it goes off — and it says so in the activity log rather than going deaf silently.
 
 #### 🎛 Two drawers instead of one
-⚙ **SETUP** holds the things you set once — remote control, desktop shortcut, auto-start and customisation. 🎛 **CONTROLS** holds the switches you flick daily — fullscreen, morning brief, wake word, sleep, push-to-talk, HUD style. Only one is open at a time, and each sits under its own header button.
+⚙ **SETUP** holds the things you set once — desktop shortcut, auto-start and customisation. 🎛 **CONTROLS** holds the switches you flick daily — fullscreen, morning brief, wake word, sleep, push-to-talk, HUD style. Only one is open at a time, and each sits under its own header button.
 
 The panel used to stutter when it opened, and the obvious explanation — too many buttons — was wrong. Measured, the **first** wake-word state check took **2.104 seconds**, because it imported `openwakeword` on the UI thread the moment the drawer was built. That import now happens off-thread at boot, and the drawer opens instantly whether it has six buttons or sixteen.
 
@@ -273,6 +310,8 @@ It is held in memory only, deliberately: writing it to disk would make a fresh l
 
 ## ⚡ Quick Start
 
+> Moving to another PC? Use the one-file installer instead: see **Moving JARVIS to another PC** above.
+
 ```bash
 git clone https://github.com/FatihMakes/Mark-LV.git
 cd Mark-LV
@@ -308,6 +347,12 @@ Mark LV/
 ├── main.py                   # Core loop — Gemini Live session, audio I/O, viseme extraction, tool dispatch
 ├── ui.py                     # PyQt6 HUD — avatar canvas, waveform, log panel, settings drawer, camera feed
 ├── setup.py                  # OS-aware installer (skips wrong-OS dependencies, checks your Python)
+├── ui_chat.py                # Floating robot + chat window (the default interface)
+├── open_close_apps.py        # Windows app opener/closer used by offline mode
+├── portable/                 # build_installer.py -> dist/JARVIS-Setup.exe, plus install/uninstall scripts
+├── assets/                   # robot icon PNGs (transparent + rounded tile)
+├── tests/                    # test_tools / test_offline / test_selfimprove / test_ui_chat
+├── models/vosk/              # offline speech model (git-ignored, packed into the installer)
 ├── .gitignore                # Keeps your API key, TLS key and memories out of the repository
 ├── plugins/
 │   └── _template.py          # Copy this to write a new skill — one file, drop in, done
@@ -351,7 +396,6 @@ Mark LV/
 │   └── wake_word.py          # Local "Hey Jarvis" detector — own thread, offline, opt-in
 └── config/
     ├── api_keys.json         # API key, name, voice, colour, toggles — created on first launch (git-ignored)
-    └── certs/                # Self-signed TLS pair for the phone dashboard — generated locally (git-ignored)
 ```
 
 ---
@@ -371,7 +415,6 @@ Everything stays on your machine. There is no MARK server, no telemetry and no a
 | What | Where | Notes |
 |---|---|---|
 | Gemini API key, plugin credentials | `config/api_keys.json` | **Plaintext.** Anyone with your user account can read it. Treat it like a password file. |
-| Dashboard TLS certificate + private key | `config/certs/` | Generated locally, self-signed, never leaves the machine. |
 | What the assistant remembers about you | `memory/long_term.json` | Delete the file to make it forget everything. |
 
 All three are listed in `.gitignore`, so a fork or a pull request cannot leak them by accident. **If you have already committed `config/api_keys.json` anywhere public, revoke that key** at [aistudio.google.com](https://aistudio.google.com/app/apikey) and generate a new one — removing the file in a later commit does not remove it from the history.

@@ -554,14 +554,16 @@ def toggle_wifi():
         subprocess.run(["networksetup", "-setairportpower", iface, state],
             capture_output=True)
     elif _OS == "Windows":
+        # Disable-NetAdapter needs administrator rights and failed silently
+        # without them. The radio API used by system_toggles does not.
         try:
-            subprocess.run(
-                ["powershell", "-Command",
-                 "$adapter = Get-NetAdapter | Where-Object {$_.PhysicalMediaType -eq 'Native 802.11'};"
-                 "if ($adapter.Status -eq 'Up') { Disable-NetAdapter -Name $adapter.Name -Confirm:$false }"
-                 "else { Enable-NetAdapter -Name $adapter.Name -Confirm:$false }"],
-                capture_output=True, timeout=10, **_WIN_HIDE
-            )
+            from actions.system_toggles import _radio_is_on, _radio_set
+            is_on, problem = _radio_is_on("WiFi")
+            if is_on is None:
+                raise RuntimeError(problem)
+            problem = _radio_set("WiFi", not is_on)
+            if problem:
+                raise RuntimeError(problem)
         except Exception as e:
             print(f"[Settings] toggle_wifi Windows failed: {e}")
     else:

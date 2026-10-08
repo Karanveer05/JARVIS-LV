@@ -5,18 +5,25 @@
 # never be.
 
 # ── Secrets. Committing any of these publishes them. ──────────────────────────
-config/api_keys.json          # your Gemini API key, plus per-plugin credentials
-config/certs/                 # the dashboard's TLS private key and certificate
-config/whatsapp_web/          # a LINKED WhatsApp session — committing it hands
+# your Gemini API key, plus per-plugin credentials
+config/api_keys.json
+# a LINKED WhatsApp session — committing it hands
+config/whatsapp_web/
                               # somebody your WhatsApp account, not just a key
-**/token*.json                # Google OAuth tokens (Gmail / Calendar plugins)
-**/client_secret*.json        # Google OAuth client secrets
+# Google OAuth tokens (Gmail / Calendar plugins)
+**/token*.json
+# Google OAuth client secrets
+**/client_secret*.json
 *credentials*.json
 .env
 .env.*
 
 # ── Personal data the assistant accumulates about you ─────────────────────────
 memory/long_term.json
+memory/notes.json
+memory/notes.corrupt.json
+memory/chats.json
+memory/ui_state.json
 memory/*.db
 
 # ── Python build noise ────────────────────────────────────────────────────────
@@ -48,3 +55,15 @@ desktop.ini
 logs/
 downloads/
 screenshots/
+
+# Encrypted site logins (see actions/credential_vault.py)
+config/vault.enc
+config/vault.key
+
+# Offline assistant: its private copy of your history, and the downloaded speech model
+memory/offline_history.json
+models/
+
+# Learned lessons and noticed routines (private to this PC)
+memory/lessons.json
+memory/routines.json

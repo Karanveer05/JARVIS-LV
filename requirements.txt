@@ -47,12 +47,9 @@ psutil>=5.9,<8
 send2trash                   # file_controller — recoverable deletes
 python-pptx                  # file_processor — presentation reading
 
-# ── Remote dashboard (control from your phone) ────────────────────────────────
-fastapi>=0.110,<1
-uvicorn[standard]>=0.27,<1
-cryptography>=42,<50
-python-multipart>=0.0.9,<1
-qrcode[pil]>=7,<9
+# ── Shared helpers ────────────────────────────────────────────────────────────
+cryptography>=42,<50           # credential_vault
+qrcode[pil]>=7,<9              # everyday_tools
 
 # ── Plugin extras ─────────────────────────────────────────────────────────────
 # Plugins are downloaded one file at a time from the community, so their
@@ -107,3 +104,8 @@ pynvml                       # system_monitor + the HUD's GPU meter (NVIDIA)
 # macOS / Linux OS actions (volume, brightness, reminders) shell out to native
 # tools (pactl / brightnessctl / osascript / systemd), so no extra Python
 # packages are needed there — nothing Windows-specific is ever pulled in.
+
+# ── Offline assistant (works with no internet) ────────────────────────────────
+# vosk hears you offline; its small English model (about 40 MB) goes in models/vosk — download:
+#   https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip   (unzip into models/vosk/)
+vosk

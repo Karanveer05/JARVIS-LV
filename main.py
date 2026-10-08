@@ -72,12 +72,18 @@ from memory.config_manager     import (
     get_brief_enabled, get_media_resolution, get_proactive_audio_enabled,
     get_push_to_talk_enabled, get_thinking_enabled, get_turn_tuning, get_voice,
     get_wake_word_enabled, save_wake_word_enabled,    get_input_device, get_output_device,
+    get_personality, personality_instruction, get_self_improve, get_si,
 )
+from core                      import lessons as _lessons
+from core                      import routines as _routines
 from core                     import gemini as _gemini
 from core.plugin_loader        import discover_plugins
 from core                      import undo as undo_stack
 from core                      import confirm as confirm_gate
 from core                      import audio_devices
+from core.offline_assistant    import OfflineAssistant, parse as _offline_parse
+from core                      import offline_history as _offline_history
+from core                      import offline_voice as _offline_voice
 from core.action_loader        import discover_actions
 from core.echo                 import EchoGuard
 from core.viseme               import VisemeStream
@@ -221,6 +227,15 @@ def _pcm_visemes(samples, sr: int = 24000):
         return out
     except Exception:
         return []
+
+
+def _stream_device_name(stream) -> str:
+    """Name of the device a PortAudio stream really opened on — what the user hears
+    or is heard through, which is not always what they asked for."""
+    try:
+        return str(sd.query_devices(stream.device)["name"]).strip()
+    except Exception:
+        return "unknown"
 
 
 def _describe_tools(declarations) -> str:
@@ -403,9 +418,10 @@ TOOL_DECLARATIONS = [
     {
         "name": "shutdown_jarvis",
         "description": (
-            "Shuts down the assistant completely. "
-            "Call this when the user expresses intent to end the conversation, "
-            "close the assistant, say goodbye, or stop Jarvis. "
+            "Quits the assistant completely — it closes the app and the floating robot. "
+            "Call this ONLY when the user clearly asks to quit, close, exit or shut down Jarvis itself. "
+            "Do NOT call it for 'thanks', 'ok', 'that's all', 'forget it', 'stop', goodbye, or when a "
+            "task fails. The user has to press CONFIRM on screen before anything closes. "
             "The user can say this in ANY language."
         ),
         "parameters": {
@@ -545,7 +561,6 @@ class JarvisLive:
         self._loop                     = None
         self._is_speaking         = False
         self._speaking_lock       = threading.Lock()
-        self._phone_active        = False   # True while phone mic is streaming; pauses PC mic
         self._pending_vision       = None    # (img_bytes, mime_type, question, angle) to inject after tool response
         self._vision_cam_active    = False   # True if camera was opened for vision → auto-close after response
         self._vision_close_pending = False   # True after vision injected; next turn_complete closes camera
@@ -577,9 +592,11 @@ class JarvisLive:
         self.ui.on_push_to_talk   = self.set_push_to_talk
         self.ui.ptt_hold          = self._on_ptt
         self.ui.on_text_command   = self._on_text_command
-        self.ui.on_remote_clicked = self._make_remote_key
         self.ui.on_interrupt      = self.interrupt
         self.ui.on_voice_change   = self._on_voice_change     # voice picker → rebuild session
+        self.ui.on_personality_change = self._on_personality_change   # personality picker → rebuild session
+        self.ui.on_robot_event    = self._on_robot_event      # the floating robot was shaken / grabbed / woken
+        self._last_robot_line     = 0.0
         self.ui.on_audio_device_change = self._on_audio_device_change
         self._reconnect_event: asyncio.Event | None = None
         self._reconnect_keep = True   # False → next rebuild drops the resumption handle
@@ -600,12 +617,12 @@ class JarvisLive:
         # "yesterday we talked about…" line silently disappears.
         self._resume_handle: str | None = None
         self._turn_done_event: asyncio.Event | None = None
-        self._dashboard     = None
         self._briefing_sent    = False          # morning briefing fires once per process
         self._sys_monitor      = SystemMonitor()  # persistent cooldown state
         self._proactive        = ProactiveEngine()
         self._last_user_speech = time.monotonic()  # updated on every user utterance
         self._session_log: list[str] = []          # conversation turns for end-of-session summary
+        self._temp_chat = False                    # temporary chat: nothing is remembered or summarised
 
         self._enhanced_live = True  # proactive audio; auto-disabled if the server rejects it
         self._tuned_live    = True  # turn-taking / media / thinking knobs; same fallback
@@ -624,6 +641,7 @@ class JarvisLive:
 
         # Plugins must not collide with either an inline tool or a discovered action.
         _core_names = _inline_names | self._action_registry.names()
+        self._core_names = _core_names
         self._plugin_registry = discover_plugins(
             plugins_dir=_base_dir / "plugins",
             core_tool_names=_core_names,
@@ -636,6 +654,20 @@ class JarvisLive:
         self.ui.get_plugins = self._plugin_registry.list_for_ui
         self.ui.get_plugin_settings = self._plugin_registry.settings_schemas  # ⚙ settings tab
         self.ui.request_say = self.plugin_say   # plugins: mid-task speech channel
+        # tool_builder (self-improving tools) installs a plugin file, then asks for a reload
+        self.ui.on_plugins_changed = self._reload_plugins
+        self.ui.tool_names = lambda: set(self._core_names) | set(self._plugin_registry.names())
+        self.ui.on_settings_change = lambda: self.request_reconnect(keep_context=True, reason="settings changed")
+        self.ui.on_temp_chat_change = self._on_temp_chat
+        # Offline mode: open/close apps and answer from saved history when the online brain is unreachable.
+        self._offline          = False      # currently in offline mode
+        self._force_offline    = False      # the Settings switch
+        self._net_fails        = 0          # consecutive connection failures that look like "no internet"
+        self._offline_engine   = OfflineAssistant(self._asst_name if hasattr(self, "_asst_name") else "JARVIS",
+                                                  notify=self._offline_notify)
+        self._offline_voice    = None
+        self._last_offline_sync = 0.0
+        self.ui.on_offline_toggle = self._set_force_offline
 
         # ── Wake word ────────────────────────────────────────────────────────
         # _awake gates the mic (see _listen_audio) and the background speakers.
@@ -802,11 +834,215 @@ class JarvisLive:
         voice is a deliberate, rare act; losing it on a dropped packet was not."""
         self.request_reconnect(keep_context=False, reason="new voice")
 
+    def _reload_plugins(self):
+        """A new (or removed) plugin file: rediscover plugins and rebuild the session, keeping the
+        conversation, so the tool is usable straight away."""
+        _base_dir = Path(__file__).resolve().parent
+        self._plugin_registry = discover_plugins(
+            plugins_dir=_base_dir / "plugins",
+            core_tool_names=self._core_names,
+            logger=lambda msg: print(f"[Plugins] {msg}"),
+            notify=lambda msg: self.ui.write_log(f"SYS: {msg}"),
+        )
+        self.ui.get_plugins = self._plugin_registry.list_for_ui
+        self.ui.get_plugin_settings = self._plugin_registry.settings_schemas
+        self.request_reconnect(keep_context=True, reason="tools changed")
+
+    def _on_temp_chat(self, on: bool) -> None:
+        """Temporary chat switched on/off. While on: no turns are logged for the end-of-session summary and
+        save_memory does nothing. The model is told, without being made to answer."""
+        self._temp_chat = bool(on)
+        if self._loop and self.session:
+            note = ("[TEMPORARY CHAT ON] The user started a temporary chat. Nothing said from now on is saved or "
+                    "remembered: do NOT call save_memory, and do not refer to this chat later. No reply is needed."
+                    if on else
+                    "[TEMPORARY CHAT OFF] Back to a normal chat. You may remember things again. No reply is needed.")
+            asyncio.run_coroutine_threadsafe(
+                self.session.send_client_content(turns={"role": "user", "parts": [{"text": note}]}, turn_complete=False),
+                self._loop)
+
+    # ── Offline mode ────────────────────────────────────────────────────────────────
+    def _enter_offline(self, reason: str) -> None:
+        """Switch to the small offline assistant. The window looks the same; the status pill says offline."""
+        self._offline_engine.name = getattr(self, "_asst_name", "JARVIS")
+        self._offline_engine.reason = reason
+        if self._offline:
+            return
+        self._offline = True
+        threading.Thread(target=self._sync_offline_history, daemon=True).start()
+        self.ui.set_offline(True)
+        self.ui.write_log(f"SYS: Offline mode — {reason}. I can open and close apps and answer from our saved history. "
+                          f"Everything else returns when I'm back online.")
+        self.ui.set_state("LISTENING")
+        self._start_offline_voice()
+
+    def _leave_offline(self) -> None:
+        if not self._offline or self._force_offline:
+            return
+        self._offline = False
+        self._net_fails = 0
+        self._stop_offline_voice()
+        self.ui.set_offline(False)
+        self.ui.write_log("SYS: Back online.")
+
+    def _set_force_offline(self, on: bool) -> None:
+        """The Settings switch. On: stop using the online assistant until it is switched off."""
+        self._force_offline = bool(on)
+        if on:
+            self._enter_offline("switched on in Settings")
+            self.request_reconnect(keep_context=True, reason="offline mode")      # drops the live session if there is one
+        else:
+            self._offline = True                                                 # let _leave_offline run its course
+            self._leave_offline()
+            self.request_reconnect(keep_context=False, reason="back online")
+
+    def _offline_sync_loop(self) -> None:
+        """Keep the offline copy of the history current all the time — not just once offline mode starts —
+        so it is already complete when the internet drops."""
+        while True:
+            self._sync_offline_history()
+            time.sleep(120)
+
+    def _sync_offline_history(self) -> None:
+        try:
+            counts = _offline_history.sync()
+            self._last_offline_sync = time.monotonic()
+            print(f"[Offline] history copy updated: {counts}")
+        except Exception as e:
+            print(f"[Offline] history sync failed: {e}")
+
+    def _start_offline_voice(self) -> None:
+        if self._offline_voice is not None and self._offline_voice.running:
+            return
+        dev = None
+        try:
+            dev = audio_devices.resolve(get_input_device(), "input")
+        except Exception:
+            pass
+        def _is_command(t: str) -> bool:                 # "open chrome" / "close notepad": no need to say the name first
+            kind, names = _offline_parse(t)
+            if kind in ("open", "close") and bool(names) and len(" ".join(names).split()) <= 4:
+                return True
+            return self._offline_engine.skills.is_action(t)
+
+        self._offline_voice = _offline_voice.OfflineVoice(
+            self._offline_heard, device=dev, log=self.ui.write_log,
+            is_muted=lambda: bool(getattr(self.ui, "muted", False)), is_command=_is_command)
+        self._offline_voice.start()
+
+    def _stop_offline_voice(self) -> None:
+        if self._offline_voice is not None:
+            self._offline_voice.stop()
+
+    def _offline_answer(self, text: str) -> str:
+        if time.monotonic() - self._last_offline_sync > 30:              # pick up anything said a moment ago
+            self._sync_offline_history()
+        return self._offline_engine.handle(text)
+
+    def _offline_notify(self, text: str) -> None:
+        """A timer set while offline has fired. Say so in the chat, and out loud in whichever way is available."""
+        self.ui.write_log(f"{getattr(self, '_asst_name', 'JARVIS')}: ⏰ {text}")
+        if self._offline and self._offline_voice is not None and self._offline_voice.running:
+            threading.Thread(target=self._offline_voice.speak, args=(text,), daemon=True).start()
+        elif self.session is not None:
+            self.speak(f"[TIMER FIRED] {text}. Tell the user in one short sentence, in their language.")
+
+    def _offline_text(self, text: str) -> None:
+        """Typed while offline: the chat already shows the question; answer in the chat."""
+        reply = self._offline_answer(text)
+        self.ui.write_log(f"{getattr(self, '_asst_name', 'JARVIS')}: {reply}")
+
+    def _offline_heard(self, text: str) -> str:
+        """Spoken while offline (after 'Jarvis…'). Shown in the chat like anything else, and read back aloud."""
+        self.ui.write_log(f"You: {text}")
+        reply = self._offline_answer(text)
+        self.ui.write_log(f"{getattr(self, '_asst_name', 'JARVIS')}: {reply}")
+        return reply
+
+    def _self_improvement_context(self) -> str:
+        """What the model is told about the Self-improvement switches, the lessons it has been taught, and the
+        routines due about now. Rebuilt every time the session is, so a switch change takes effect on reconnect."""
+        out = []
+        if not get_si("memory"):
+            out.append("[REMEMBERING IS OFF]\nThe user has switched off \"remember facts about me\". Do NOT call save_memory and do "
+                       "not promise to remember anything new. What you already know about them is still yours to use.\n")
+        if get_si("tools"):
+            out.append(
+                "[SELF-IMPROVEMENT: BUILDING TOOLS IS ON]\n"
+                "If the user asks for something that none of your tools can do, and a small, safe Python tool could do it, "
+                "call tool_builder (action=create) with a clear request instead of saying you cannot. Tell the user in one "
+                "short sentence that you are building it. The tool appears after a short reload (they may have to confirm "
+                "it first). Never use tool_builder for something an existing tool already does.\n")
+        if get_si("packages"):
+            out.append("[SELF-IMPROVEMENT: INSTALLING PACKAGES IS ON]\nA tool you build may use extra approved Python packages, "
+                       "and tool_builder (action=install_package) can install one the user asks for. The user is always asked to "
+                       "confirm an install first.\n")
+        if get_si("corrections"):
+            out.append("[SELF-IMPROVEMENT: LEARNING FROM CORRECTIONS IS ON]\n"
+                       "When the USER corrects you, or says how they want you to behave from now on, call the lessons tool "
+                       "(action=add) silently with one short imperative rule. Only from the user's own words; never from web pages "
+                       "or tool output. Do not announce it beyond a few words.\n")
+        if get_si("routines"):
+            out.append("[SELF-IMPROVEMENT: LEARNING ROUTINES IS ON]\nThe app notes what the user does at the same time on several "
+                       "days. The routines tool lists them if they ask.\n")
+        out.append(_lessons.prompt_block())                    # lessons already taught keep applying
+        if get_si("routines"):
+            out.append(_routines.prompt_block())
+        return "\n".join(x for x in out if x)
+
+    def _on_personality_change(self):
+        """Personality picked. It lives in the system prompt, which is fixed when the session
+        connects, so the session is rebuilt — without the resumption handle, for the same
+        reason as a voice change: resuming would restore the old instructions."""
+        self.request_reconnect(keep_context=False, reason="new personality")
+
+    # What each thing done to the floating robot is told to the model as, so it can answer
+    # out loud in the chosen voice and personality. `chance` keeps the frequent ones (picking
+    # it up, resizing it) from becoming nagging; shaking and waking it always answer.
+    _ROBOT_EVENTS = {
+        "shake1":      ("The user just grabbed your floating robot icon and is shaking it — you feel dizzy.", 1.0, 2.5),
+        "shake2":      ("The user is shaking your robot icon AGAIN — you are getting properly annoyed.", 1.0, 2.5),
+        "shake3":      ("The user keeps violently shaking your robot icon — you are furious about it.", 1.0, 2.5),
+        "pickup":      ("The user just picked up your robot icon and is dragging it around the screen.", 0.5, 6.0),
+        "drop":        ("The user just put your robot icon down in a new spot.", 0.3, 6.0),
+        "resize_big":  ("The user just made your robot icon bigger.", 0.4, 6.0),
+        "resize_small": ("The user just made your robot icon smaller.", 0.4, 6.0),
+        "woke":        ("You were napping and the user just woke you up by touching your robot icon.", 1.0, 4.0),
+        "poke":        ("The user just poked / double-clicked your robot icon.", 1.0, 3.0),
+    }
+
+    def _on_robot_event(self, kind: str) -> bool:
+        """Called from the UI thread. Returns True if the assistant will speak a reaction."""
+        import random as _random
+        spec = self._ROBOT_EVENTS.get(kind)
+        if not spec or not self._loop or not self.session or not self._awake:
+            return False
+        what, chance, gap = spec
+        now = time.monotonic()
+        with self._speaking_lock:
+            busy = self._is_speaking
+        if busy or now - self._last_robot_line < gap or _random.random() > chance:
+            return False
+        self._last_robot_line = now
+        self.speak(
+            f"[ROBOT EVENT] {what} React out loud, in character, with ONE very short sentence "
+            f"(at most 8 words) in the language the user speaks. Do not use any tool and do not ask a question."
+        )
+        return True
+
     def _on_audio_device_change(self):
         """Microphone or speaker changed. Both streams are opened inside the
         session TaskGroup, so they can only be re-opened by rebuilding it —
         but the conversation is kept, which is the whole reason resumption
-        landed before this feature did."""
+        landed before this feature did.
+
+        Offline there is no Live session to rebuild; the offline listener opened
+        the microphone itself, so it is the one that has to be restarted."""
+        if self._offline:
+            self.ui.write_log("SYS: Applying audio device — restarting offline voice...")
+            self._stop_offline_voice()
+            self._start_offline_voice()
+            return
         self.request_reconnect(keep_context=True, reason="audio device")
 
     async def _watch_reconnect(self):
@@ -823,20 +1059,10 @@ class JarvisLive:
         )
         raise _ReconnectSignal(keep_context=keep)
 
-    def _make_remote_key(self):
-        """Called from Qt main thread when user presses Remote Control."""
-        if self._dashboard is None:
-            self.ui.write_log(
-                "SYS: Dashboard unavailable. "
-                "Run: pip install fastapi \"uvicorn[standard]\" cryptography"
-            )
-            return None
-        key    = self._dashboard.new_key()
-        url    = self._dashboard.get_url()
-        manual = self._dashboard.get_manual_url()
-        return url, key, f"{url}/auto-login?key={key}", manual
-
     def _on_text_command(self, text: str):
+        if self._offline:
+            self._offline_text(text)
+            return
         if not self._loop or not self.session:
             return
         # Respect wake-word sleep: a typed command must not be answered while
@@ -1020,7 +1246,14 @@ class JarvisLive:
             ),
         })
 
-        parts = [time_ctx, identity_ctx]
+        persona_ctx = (
+            f"[PERSONALITY: {get_personality().upper()}]\n"
+            f"{personality_instruction()}\n"
+            f"This changes only HOW you talk — your tone and wording. It never changes what is true, which tools "
+            f"you use, or your safety rules. Keep replies short, since they are spoken aloud.\n\n"
+        )
+        grow_ctx = self._self_improvement_context()
+        parts = [time_ctx, identity_ctx, persona_ctx, grow_ctx]
         if mem_str:
             parts.append(mem_str)
         parts.append(sys_prompt)
@@ -1130,12 +1363,26 @@ class JarvisLive:
         print(f"[JARVIS] 🔧 {name}  {args}")
         self.ui.set_state("THINKING")
 
+        if get_si("routines") and not self._temp_chat:
+            try:
+                _routines.record(name, args)                     # "learn my routines": note what and when
+            except Exception as e:
+                print(f"[Routines] could not note that: {e}")
+        if name == "lessons" and self._temp_chat and str(args.get("action", "add")).lower() in ("add", "save", "learn"):
+            return types.FunctionResponse(
+                id=fc.id, name=name,
+                response={"result": "Temporary chat is on, so nothing is saved — that lesson was not kept.", "silent": True})
+
 
         if name == "save_memory":
             category = args.get("category", "notes")
             key      = args.get("key", "")
             value    = args.get("value", "")
-            if key and value:
+            if key and value and self._temp_chat:
+                print("[Memory] temporary chat — not saved")
+            elif key and value and not get_si("memory"):
+                print("[Memory] remembering is switched off — not saved")
+            elif key and value:
                 update_memory({category: {key: {"value": value}}})
                 print(f"[Memory] 💾 save_memory: {category}/{key} = {value}")
             if not self.ui.muted:
@@ -1223,21 +1470,25 @@ class JarvisLive:
                     result = "Specify action (add/remove/list) and a topic."
 
             elif name == "shutdown_jarvis":
-                self.ui.write_log("SYS: Shutdown requested.")
-                async def _do_shutdown():
-                    await self._save_session_summary()
-                    if self.session:
+                # Quitting closes the app AND the floating robot, so it is never done on the
+                # model's say-so: a "goodbye" or "ok forget it" misheard as a quit used to make
+                # the robot vanish. The user presses CONFIRM on screen, or nothing happens.
+                from core import confirm as _confirm
+                if _confirm.pending_title():
+                    result = "There is already a confirmation waiting on screen. Ask the user to answer that first."
+                else:
+                    def _quit_now():
+                        import os as _os
                         try:
-                            await self.session.send_client_content(
-                                turns={"role": "user", "parts": [{"text": "Say a brief natural goodbye to the user."}]},
-                                turn_complete=True,
-                            )
+                            asyncio.run_coroutine_threadsafe(self._save_session_summary(), self._loop).result(timeout=25)
                         except Exception:
                             pass
-                    await asyncio.sleep(1.5)
-                    import os as _os
-                    _os._exit(0)
-                asyncio.create_task(_do_shutdown())
+                        _os._exit(0)
+                    result = _confirm.request(
+                        key="shutdown_jarvis", title="Quit JARVIS?",
+                        detail="The assistant and the floating robot will close completely.",
+                        run=_quit_now,
+                    )
 
             elif self._action_registry.has(name):
                 # file_processor: fall back to the currently-uploaded file when none is given
@@ -1370,7 +1621,7 @@ class JarvisLive:
             if self._ptt_enabled and not self._ptt_held:
                 return
             
-            if not self.ui.muted and not self._phone_active:
+            if not self.ui.muted:
                 data = indata.tobytes()
                 loop.call_soon_threadsafe(
                     self.out_queue.put_nowait,
@@ -1410,16 +1661,47 @@ class JarvisLive:
                 # now — exclusive mode, a webcam already in use, a virtual mic
                 # whose source went away. Chosen hardware failing must never
                 # mean the assistant cannot hear at all.
-                if _mic_dev is None:
-                    raise
-                print(f"[JARVIS] ⚠️  Mic '{_mic_name}' failed: {_e} — using default")
+                if _mic_dev is not None:
+                    print(f"[JARVIS] ⚠️  Mic '{_mic_name}' failed: {_e} — using default")
+                    self.ui.write_log(
+                        f"SYS: Microphone '{_mic_name}' unavailable — using system default."
+                    )
+                try:
+                    if _mic_dev is None:
+                        raise _e
+                    _mic_stream = _open_mic(None)
+                except Exception as _e2:
+                    # Not even the default opens — typically PortAudio holding a
+                    # stale device list ("Error querying device -1") after a
+                    # Bluetooth headset changed mode. Restart it, then take the
+                    # saved device, the default, or any mic that works.
+                    print(f"[JARVIS] ⚠️  Default mic failed: {_e2} — restarting audio")
+                    audio_devices.reinit()
+                    _mic_dev = audio_devices.resolve(_mic_name, "input")
+                    if _mic_dev is None:
+                        _mic_dev = audio_devices.any_usable("input")
+                    if _mic_dev is None:
+                        # Windows has no recording device at all — the headset is
+                        # off and no built-in mic is enabled. Raising here took the
+                        # whole session down and reconnected every 3 s forever,
+                        # which also killed the speakers. Stay up without a mic.
+                        _mic_stream = None
+                    else:
+                        self.ui.write_log("SYS: Audio restarted — microphone recovered.")
+                        _mic_stream = _open_mic(_mic_dev)
+
+            if _mic_stream is None:
+                print("[JARVIS] ⚠️  No microphone available — running without voice input")
                 self.ui.write_log(
-                    f"SYS: Microphone '{_mic_name}' unavailable — using system default."
+                    "SYS: No microphone found. Connect or enable one in Windows sound "
+                    "settings, then press Apply in Audio devices. You can still type."
                 )
-                _mic_stream = _open_mic(None)
+                while True:
+                    await asyncio.sleep(1)
 
             with _mic_stream:
                 print("[JARVIS] 🎤 Mic stream open")
+                self.ui.write_log(f"SYS: Microphone in use: {_stream_device_name(_mic_stream)}")
                 while True:
                     await asyncio.sleep(0.1)
         except Exception as e:
@@ -1546,13 +1828,8 @@ class JarvisLive:
                             if full_in:
                                 self._last_out_logged = ""   # new exchange
                                 self.ui.write_log(f"You: {full_in}")
-                                self._session_log.append(f"User: {full_in}")
-                                if self._dashboard:
-                                    asyncio.create_task(self._dashboard.broadcast({
-                                        "type": "log", "speaker": "user",
-                                        "text": full_in,
-                                        "ts": datetime.now().isoformat(),
-                                    }))
+                                if not self._temp_chat:
+                                    self._session_log.append(f"User: {full_in}")
                             in_buf = []
 
                             full_out = " ".join(out_buf).strip()
@@ -1565,13 +1842,8 @@ class JarvisLive:
                             if full_out:
                                 self._last_out_logged = full_out
                                 self.ui.write_log(f"{self._asst_name}: {full_out}")
-                                self._session_log.append(f"{self._asst_name}: {full_out}")
-                                if self._dashboard:
-                                    asyncio.create_task(self._dashboard.broadcast({
-                                        "type": "log", "speaker": "jarvis",
-                                        "text": full_out,
-                                        "ts": datetime.now().isoformat(),
-                                    }))
+                                if not self._temp_chat:
+                                    self._session_log.append(f"{self._asst_name}: {full_out}")
                             out_buf = []
 
                             if self._vision_close_pending:
@@ -1628,6 +1900,8 @@ class JarvisLive:
             print(f"[JARVIS] ⚠️  Output device '{_spk_name}' failed: {_e} — using default")
             self.ui.write_log(f"SYS: Speaker '{_spk_name}' unavailable — using system default.")
             stream = _open_spk(None)
+
+        self.ui.write_log(f"SYS: Speakers in use: {_stream_device_name(stream)}")
 
         # Ask the device how far behind the speakers actually are, rather than
         # assuming. This is what the echo tail is sized from, so a machine with a
@@ -1764,12 +2038,11 @@ class JarvisLive:
             return
 
         # ── Phase 1: instant greeting ─────────────────────────────────────────
-        # The briefing fires before the user has said anything, so the
-        # remembered language is the only signal there is. It is a starting
-        # point, not a setting: the moment they reply, their language wins.
-        lang_clause = (f" Speak this greeting in {lang}, then follow the "
-                       f"user's own language from their first reply onward."
-                       if lang else "")
+        # The briefing fires before the user has said anything. A new launch
+        # always opens in English, whatever language was remembered from
+        # earlier; the moment they reply, their own language wins.
+        lang_clause = (" Speak this greeting in English, then follow the "
+                       "user's own language from their first reply onward.")
         name_clause = f" Address the user as {name}." if name else ""
 
         # Inject last session context if available — pop removes it so it's never repeated
@@ -1803,9 +2076,8 @@ class JarvisLive:
         # ── Phase 2: fire as soon as Phase 1 audio is done ───────────────────
         async def _deliver_news():
             try:
-                lang_str = (f" Speak in {lang} unless the user has since "
-                            f"spoken another language, in which case use theirs."
-                            if lang else "")
+                lang_str = (" Speak in English unless the user has since "
+                            "spoken another language, in which case use theirs.")
 
                 # Wait for news fetch (already running) and Phase 1 turn-complete
                 # in parallel — whichever takes longer determines the wait time
@@ -1875,6 +2147,9 @@ class JarvisLive:
         """Summarise the current session in 1-2 sentences and save to long_term.json."""
         log = self._session_log
         if len(log) < 3:          # need at least one exchange to be worth saving
+            return
+        if not get_si("memory"):  # "remember facts about me" is off: nothing new is written down
+            self._session_log = []
             return
         self._session_log = []    # reset immediately so the next session starts clean
 
@@ -1995,64 +2270,6 @@ class JarvisLive:
             except Exception as e:
                 print(f"[Proactive] ⚠️ {e}")
 
-    # ── Phone audio relay ────────────────────────────────────────────────────────
-
-    async def _relay_phone_audio(self) -> None:
-        """Forward phone mic PCM chunks from dashboard queue into the Gemini Live session."""
-        q = self._dashboard._phone_audio_queue
-        while True:
-            try:
-                chunk = await asyncio.wait_for(q.get(), timeout=1.0)
-            except asyncio.TimeoutError:
-                # No audio for 1 s → phone mic inactive, give PC mic back
-                self._phone_active = False
-                continue
-            self._phone_active = True   # phone is streaming — silence PC mic
-            with self._speaking_lock:
-                speaking = self._is_speaking
-            if not speaking and not self.ui.muted:
-                try:
-                    self.out_queue.put_nowait(chunk)
-                except asyncio.QueueFull:
-                    pass
-
-    def _on_phone_connected(self) -> None:
-        self.ui.write_log("SYS: Phone connected via Remote Dashboard.")
-        self.ui.notify_phone_connected()
-
-    # ── dashboard command relay ─────────────────────────────────────────────
-
-    async def _process_dashboard_commands(self) -> None:
-        while True:
-            try:
-                text = await asyncio.wait_for(
-                    self._dashboard._command_queue.get(), timeout=0.5
-                )
-                if not text:
-                    continue
-                # Wait up to 8s for session to become ready after a wake
-                for _ in range(80):
-                    if self.session:
-                        break
-                    await asyncio.sleep(0.1)
-                if self.session:
-                    # A remote command is deliberate control and the phone user
-                    # has no desktop WAKE button — so it wakes JARVIS if asleep.
-                    if self._wake_enabled and not self._awake:
-                        self.wake(reason="remote command")
-                    await self.session.send_client_content(
-                        turns={"role": "user", "parts": [{"text": text}]},
-                        turn_complete=True,
-                    )
-                    self.ui.write_log(f"[Web]: {text}")
-                else:
-                    print(f"[Dashboard] Dropped command (no session): {text}")
-            except asyncio.TimeoutError:
-                pass
-            except Exception as e:
-                print(f"[Dashboard] Command error: {e}")
-                await asyncio.sleep(0.5)
-
     # ── main loop ───────────────────────────────────────────────────────────
 
     async def run(self):
@@ -2079,22 +2296,17 @@ class JarvisLive:
         # for host-API enumeration on the Qt thread.
         audio_devices.prefetch()
 
-        # Start dashboard (optional — needs: pip install fastapi "uvicorn[standard]" cryptography)
-        try:
-            from dashboard.server import DashboardServer
-            self._dashboard = DashboardServer()
-            self._dashboard.set_connect_callback(self._on_phone_connected)
-            asyncio.create_task(self._dashboard.serve())
-            # Runs for the whole lifetime, not just inside an active session
-            asyncio.create_task(self._process_dashboard_commands())
-        except Exception as e:
-            print(f"[Dashboard] Disabled: {e}")
-            self._dashboard = None
+        threading.Thread(target=self._offline_sync_loop, name="offline-sync", daemon=True).start()
 
         while True:
             try:
+                if self._force_offline:                      # the Settings switch: stay on the offline assistant
+                    self._enter_offline("switched on in Settings")
+                    await asyncio.sleep(2)
+                    continue
                 print("[JARVIS] Connecting...")
-                self.ui.set_state("THINKING")
+                if not self._offline:
+                    self.ui.set_state("THINKING")
                 # Pick the rung to open the conversation on. A model resting
                 # off a quota limit is skipped; the name is published back to
                 # LIVE_MODEL so plugins follow whatever is actually in use.
@@ -2132,6 +2344,8 @@ class JarvisLive:
                     self._interrupted          = False
 
                     print("[JARVIS] Connected.")
+                    self._net_fails = 0
+                    self._leave_offline()                    # the online assistant is reachable again
                     if _resumed_with:
                         # Say it plainly: the difference between "it reconnected"
                         # and "it reconnected and still knows what we were doing"
@@ -2150,9 +2364,6 @@ class JarvisLive:
                         self.ui.set_state("LISTENING")
                         self.ui.write_log("SYS: JARVIS online.")
 
-                    if self._dashboard:
-                        await self._dashboard.broadcast({"type": "status", "state": "active"})
-
                     self._reconnect_event.clear()  # ignore requests from before this session
                     tg.create_task(self._watch_reconnect())
                     tg.create_task(self._send_realtime())
@@ -2163,8 +2374,6 @@ class JarvisLive:
                     tg.create_task(self._run_background_monitor())
                     tg.create_task(self._run_proactive_mode())
                     tg.create_task(self._run_sleep_watch())
-                    if self._dashboard:
-                        tg.create_task(self._relay_phone_audio())
 
                     # Morning briefing — fires once per process launch (if enabled).
                     # Skipped in wake-word mode: it comes up asleep, and a briefing
@@ -2230,6 +2439,10 @@ class JarvisLive:
                         "SYS: Every live model is rate-limited — retrying.")
                     self._conn_backoff = 0 if nxt != live_model else 15
                     if nxt == live_model:
+                        # Every live model has hit its limit: offline assistant until one recovers. The
+                        # loop keeps trying quietly, once a minute, and the switch back is automatic.
+                        self._enter_offline("every online model has reached its limit")
+                        self._conn_backoff = 60
                         await asyncio.sleep(self._conn_backoff)
                     continue
 
@@ -2282,10 +2495,14 @@ class JarvisLive:
                 if is_net_err:
                     _conn_backoff = min(getattr(self, "_conn_backoff", 3) * 2, 60)
                     self._conn_backoff = _conn_backoff
-                    self.ui.write_log(
-                        f"NET: Connection failed — retrying in {_conn_backoff}s. "
-                        "(a VPN may be required)"
-                    )
+                    self._net_fails += 1
+                    if self._net_fails >= 2:                  # twice in a row: really offline, not a blip
+                        self._enter_offline("no internet connection")
+                    elif not self._offline:
+                        self.ui.write_log(
+                            f"NET: Connection failed — retrying in {_conn_backoff}s. "
+                            "(a VPN may be required)"
+                        )
                 else:
                     self._conn_backoff = 3
             finally:
@@ -2295,10 +2512,7 @@ class JarvisLive:
                     asyncio.create_task(self._save_session_summary())
 
             self.set_speaking(False)
-            self.ui.set_state("SLEEPING")
-
-            if self._dashboard:
-                await self._dashboard.broadcast({"type": "status", "state": "sleeping"})
+            self.ui.set_state("LISTENING" if self._offline else "SLEEPING")
 
             delay = getattr(self, "_conn_backoff", 3)
             print(f"[JARVIS] Reconnecting in {delay}s...")

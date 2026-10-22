@@ -2,7 +2,7 @@
 
 ### A voice AI assistant that hears, sees, speaks and controls your computer, and keeps working offline.
 
-**Created by [Karanveer Singh](https://github.com/Karanveer05)** · Based on [Mark LV](https://github.com/FatihMakes/Mark-LV) by [FatihMakes](https://www.youtube.com/@FatihMakes)
+**Created by [Karanveer Singh](https://github.com/Karanveer05)**
 
 [![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc/4.0/)
 ![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)
@@ -33,7 +33,7 @@
 
 JARVIS-LV is a real-time voice assistant for your desktop. It is built on the Gemini Live API for streaming audio. Talk to it or type, and it opens apps, manages files, searches the web, plays videos, sets timers, takes notes and answers questions.
 
-It started as **Mark LV** by FatihMakes. I extended it for my semester training project. The biggest additions are an **offline mode**, so the assistant still works with no internet; a new **floating robot chat interface**; and **21 more tools**.
+I built JARVIS-LV as my own project on top of an open-source voice assistant base. My biggest additions are an **offline mode**, so the assistant still works with no internet; a new **floating robot chat interface**; and **21 more tools**.
 
 📄 The full project documentation is in [`JARVIS-LV_Documentation_updated.pdf`](JARVIS-LV_Documentation_updated.pdf).
 
@@ -55,7 +55,7 @@ It started as **Mark LV** by FatihMakes. I extended it for my semester training 
 
 ## ✨ Features
 
-These features come from Mark LV, and all of them still work in JARVIS-LV.
+These core features come from the base project, and all of them still work in JARVIS-LV.
 
 | | Feature | Description |
 |---|---|---|
@@ -73,9 +73,6 @@ These features come from Mark LV, and all of them still work in JARVIS-LV.
 | ⏰ | **Reminders & monitoring** | OS-native reminders, hardware telemetry, weather, topic watching |
 | 📨 | **Messaging & browser** | Send messages and control the browser by voice |
 | 🎨 | **Customisation** | Change the assistant's name, your name, the voice and the colour live from the UI |
-
-For the full engineering notes on these features, see the [original Mark LV README](https://github.com/FatihMakes/Mark-LV).
-
 ---
 
 ## ⚡ Quick Start
@@ -197,8 +194,7 @@ While a session is open, your voice is streamed to Google's Gemini Live API. Not
 
 ## 📜 Credit & License
 
-**Copyright © 2026 Karanveer Singh**: all JARVIS-LV additions and modifications.
-**Copyright © 2026 FatihMakes**: the original Mark LV.
+**Copyright © 2026 Karanveer Singh**
 
 This project is licensed under **[Creative Commons Attribution-NonCommercial 4.0 (CC BY-NC 4.0)](https://creativecommons.org/licenses/by-nc/4.0/)**.
 
@@ -207,24 +203,20 @@ This project is licensed under **[Creative Commons Attribution-NonCommercial 4.0
 | Use it for personal, study or non-commercial projects | Sell it or use it for any commercial purpose |
 | Fork it, change it and share it | Remove or hide the credits and copyright notices |
 | Show it in videos, reports and demos | Present it as your own work |
+| | Let any company, organisation or institution claim it as theirs |
 
 ### ✍️ Credit is required
 
 If you share, fork, redistribute, demo or build on this project, put this credit where people will see it, for example in your README, About screen, video description or report:
 
 ```
-JARVIS-LV by Karanveer Singh (https://github.com/Karanveer05/JARVIS-LV),
-based on Mark LV by FatihMakes (https://github.com/FatihMakes/Mark-LV).
+JARVIS-LV by Karanveer Singh (https://github.com/Karanveer05/JARVIS-LV).
 Licensed under CC BY-NC 4.0.
 ```
 
 Keep the [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE) files in your copy, and say what you changed.
 
-### 🙏 Third-party material
-
-| Asset | Source | License |
-|---|---|---|
-| `core/face_model.obj` | [MediaPipe](https://github.com/google-ai-edge/mediapipe) canonical face model | Apache License 2.0 |
+<sub>JARVIS-LV includes code from Mark LV by FatihMakes, used under CC BY-NC 4.0. Full notices are in [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).</sub>
 
 ---
 
@@ -235,7 +227,3 @@ Keep the [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE) files in your copy, and say
 [![GitHub](https://img.shields.io/badge/GitHub-Karanveer05-181717?logo=github)](https://github.com/Karanveer05)
 
 ⭐ **If you find this project useful, please star the repository!**
-
-### Original project
-
-**Mark LV** by **FatihMakes**: [GitHub](https://github.com/FatihMakes/Mark-LV) · [YouTube](https://www.youtube.com/@FatihMakes) · [Instagram](https://www.instagram.com/fatihmakes)

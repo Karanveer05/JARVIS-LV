@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Karanveer Singh (https://github.com/Karanveer05)
+# Part of JARVIS-LV, licensed under CC BY-NC 4.0. See LICENSE and NOTICE.
 """
 Builds dist/JARVIS-Setup.exe - ONE file you copy to another Windows PC.
 
@@ -103,8 +105,15 @@ def local_secrets() -> list[bytes]:
     return sorted((v.encode("utf-8") for v in vals if v), key=len)
 
 
+# The author credit is public on purpose (copyright headers, LICENSE, About text), so it is
+# cut out before scanning. Any other appearance of the name - an e-mail, a path - still stops the build.
+PUBLIC_CREDITS = [b"karanveer singh", b"karanveer05"]
+
+
 def scan(data: bytes, secrets: list[bytes]) -> int:
     low = data.lower()
+    for c in PUBLIC_CREDITS:
+        low = low.replace(c, b"")
     return sum(1 for s in secrets if s.lower() in low)
 
 

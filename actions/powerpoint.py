@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Karanveer Singh (https://github.com/Karanveer05)
+# Part of JARVIS-LV, licensed under CC BY-NC 4.0. See LICENSE and NOTICE.
 """
 powerpoint — drive the real PowerPoint app: open it, open or create a presentation, move
 between slides, edit them, run the slide show, save and export.

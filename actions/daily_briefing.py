@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Karanveer Singh (https://github.com/Karanveer05)
+# Part of JARVIS-LV, licensed under CC BY-NC 4.0. See LICENSE and NOTICE.
 """
 daily_briefing — one call that gathers weather, your open to-dos, running timers and
 the top headlines, so JARVIS can open the day with a single spoken summary.

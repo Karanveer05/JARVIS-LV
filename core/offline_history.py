@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Karanveer Singh (https://github.com/Karanveer05)
+# Part of JARVIS-LV, licensed under CC BY-NC 4.0. See LICENSE and NOTICE.
 """
 core/offline_history.py — the offline assistant's own copy of everything JARVIS knows, and the
 search that answers questions from it.

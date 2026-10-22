@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Karanveer Singh (https://github.com/Karanveer05)
+# Part of JARVIS-LV, licensed under CC BY-NC 4.0. See LICENSE and NOTICE.
 #system_toggles.py
 """
 On / off / status for the basic system switches: Wi-Fi, Bluetooth, airplane

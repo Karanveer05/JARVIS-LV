@@ -9,13 +9,18 @@
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-informational.svg)
 ![Tools](https://img.shields.io/badge/Tools-46-success.svg)
 
-> ⚠️ **Using or sharing this project? You must credit the authors.** See [Credit & License](#-credit--license).
+> ⚠️ **Using or sharing this project? You must credit the author.** See [Credit & License](#-credit--license).
+
+<p align="center">
+  <img src="docs/images/chat.png" alt="JARVIS-LV chat window with a conversation" width="760">
+</p>
 
 ---
 
 ## 📖 Table of Contents
 
 - [About](#-about)
+- [Screenshots](#-screenshots)
 - [What JARVIS-LV Adds](#-what-jarvis-lv-adds)
 - [Features](#-features)
 - [Quick Start](#-quick-start)
@@ -36,6 +41,21 @@ JARVIS-LV is a real-time voice assistant for your desktop. It is built on the Ge
 I built JARVIS-LV as my own project on top of an open-source voice assistant base. My biggest additions are an **offline mode**, so the assistant still works with no internet; a new **floating robot chat interface**; and **21 more tools**.
 
 📄 The full project documentation is in [`JARVIS-LV_Documentation_updated.pdf`](JARVIS-LV_Documentation_updated.pdf).
+
+---
+
+## 📸 Screenshots
+
+<table>
+  <tr>
+    <td align="center" width="50%"><img src="docs/images/welcome.png" alt="Welcome screen"><br><b>Welcome screen</b><br><sub>Talk, type or upload a document</sub></td>
+    <td align="center" width="50%"><img src="docs/images/confirm.png" alt="Confirmation prompt"><br><b>Real confirmation</b><br><sub>Risky actions wait for your click</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/images/robot_listening.png" alt="Robot listening" height="160"><br><b>Floating robot: listening</b></td>
+    <td align="center"><img src="docs/images/robot_speaking.png" alt="Robot speaking" height="160"><br><b>Floating robot: speaking</b><br><sub>Click it to open the chat</sub></td>
+  </tr>
+</table>
 
 ---
 
@@ -154,8 +174,10 @@ JARVIS-LV/
 ├── portable/               # Portable installer build + install/uninstall scripts  ★ JARVIS-LV
 ├── assets/                 # Robot icons                                           ★ JARVIS-LV
 ├── tests/                  # Test suites                                           ★ JARVIS-LV
+├── docs/images/            # README screenshots                                    ★ JARVIS-LV
 ├── LICENSE                 # CC BY-NC 4.0 + copyright and attribution terms
-└── NOTICE                  # Who made what, and how to credit it
+├── NOTICE                  # Who made what, and how to credit it
+└── CITATION.cff            # Powers GitHub's "Cite this repository" button
 ```
 
 ★ marks parts added in JARVIS-LV. The full list is in [`NOTICE`](NOTICE).

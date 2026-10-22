@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Karanveer Singh (https://github.com/Karanveer05)
+# Part of JARVIS-LV, licensed under CC BY-NC 4.0. See LICENSE and NOTICE.
 """
 tool_builder — lets JARVIS grow: when you ask for something none of its tools can do, it can
 write a new tool (a plugin) for it, check it, and install it.

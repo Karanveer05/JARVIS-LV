@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Karanveer Singh (https://github.com/Karanveer05)
+# Part of JARVIS-LV, licensed under CC BY-NC 4.0. See LICENSE and NOTICE.
 """
 everyday — small things people ask an assistant all day: a strong password, a QR
 code, currency conversion, a word's meaning, the time somewhere else, a translation,

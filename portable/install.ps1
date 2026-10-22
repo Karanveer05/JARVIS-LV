@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Karanveer Singh (https://github.com/Karanveer05)
+# Part of JARVIS-LV, licensed under CC BY-NC 4.0. See LICENSE and NOTICE.
 # JARVIS installer - runs on the NEW PC after JARVIS-Setup.exe unpacks itself.
 # Per-user install, no administrator rights. Re-running it updates the program files and
 # leaves everything the app saved on that PC (API key, chats, memory) untouched.
@@ -45,7 +47,7 @@ function Find-Python {
 }
 
 try {
-    if ((Box "Install JARVIS on this PC?`n`nInstall folder:`n$TargetDir`n`nThis installer carries no personal data: no API key, chats or memory. You will be asked for your own free Gemini API key the first time JARVIS starts.`n`nIt needs an internet connection to download its Python libraries." "JARVIS Setup" "YesNo" "Question") -ne "Yes") { exit 0 }
+    if ((Box "Install JARVIS-LV by Karanveer Singh on this PC?`n`nInstall folder:`n$TargetDir`n`nThis installer carries no personal data: no API key, chats or memory. You will be asked for your own free Gemini API key the first time JARVIS starts.`n`nIt needs an internet connection to download its Python libraries." "JARVIS Setup" "YesNo" "Question") -ne "Yes") { exit 0 }
 
     Step "1/5  Copying program files"
     $zip = Join-Path $PSScriptRoot "payload.zip"
@@ -93,7 +95,7 @@ try {
         foreach ($dir in @([Environment]::GetFolderPath("Desktop"), $menu)) {
             $lnk = $sh.CreateShortcut((Join-Path $dir "JARVIS.lnk"))
             $lnk.TargetPath = $vpyw; $lnk.Arguments = '"' + (Join-Path $TargetDir "main.py") + '"'
-            $lnk.WorkingDirectory = $TargetDir; $lnk.IconLocation = $icon; $lnk.Description = "JARVIS voice assistant"
+            $lnk.WorkingDirectory = $TargetDir; $lnk.IconLocation = $icon; $lnk.Description = "JARVIS-LV voice assistant by Karanveer Singh"
             $lnk.Save()
         }
         $un = $sh.CreateShortcut((Join-Path $menu "Uninstall JARVIS.lnk"))
@@ -102,6 +104,23 @@ try {
         $un.WorkingDirectory = $TargetDir; $un.IconLocation = $icon; $un.Save()
         Say "   Desktop and Start-menu shortcuts created."
     }
+
+    # Per-user entry in Settings > Apps, so Windows shows the name and publisher. HKCU needs no admin.
+    try {
+        $reg = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\JARVIS-LV"
+        New-Item -Path $reg -Force | Out-Null
+        $vals = @{
+            DisplayName     = "JARVIS-LV"
+            Publisher       = "Karanveer Singh"
+            DisplayIcon     = (Join-Path $TargetDir "config\jarvis.ico")
+            InstallLocation = $TargetDir
+            URLInfoAbout    = "https://github.com/Karanveer05/JARVIS-LV"
+            UninstallString = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $TargetDir "uninstall.ps1") + '"'
+        }
+        foreach ($k in $vals.Keys) { Set-ItemProperty -Path $reg -Name $k -Value $vals[$k] }
+        Set-ItemProperty -Path $reg -Name NoModify -Value 1 -Type DWord
+        Set-ItemProperty -Path $reg -Name NoRepair -Value 1 -Type DWord
+    } catch { Say "   (Could not add the Settings > Apps entry: $($_.Exception.Message))" }
 
     Say ""; Say "JARVIS is installed."
     if ((Box "JARVIS is installed.`n`nStart it now? It will ask for your Gemini API key (free from aistudio.google.com/app/apikey)." "JARVIS Setup" "YesNo" "Information") -eq "Yes" -and -not $NoLaunch -and -not $Quiet) {

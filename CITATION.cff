@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use or share JARVIS-LV, please credit it as below."
+title: "JARVIS-LV"
+abstract: "A voice AI assistant that hears, sees, speaks and controls your computer, and keeps working offline."
+type: software
+authors:
+  - given-names: Karanveer
+    family-names: Singh
+    alias: Karanveer05
+repository-code: "https://github.com/Karanveer05/JARVIS-LV"
+url: "https://github.com/Karanveer05/JARVIS-LV"
+license: CC-BY-NC-4.0
+date-released: 2026-10-22
+keywords:
+  - voice assistant
+  - jarvis
+  - gemini
+  - offline assistant
+  - desktop automation
+  - python

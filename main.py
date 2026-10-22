@@ -2519,6 +2519,7 @@ class JarvisLive:
             await asyncio.sleep(delay)
 
 def main():
+    print("JARVIS-LV by Karanveer Singh - https://github.com/Karanveer05/JARVIS-LV (CC BY-NC 4.0)")
     ui = JarvisUI("face.png")
 
     def runner():

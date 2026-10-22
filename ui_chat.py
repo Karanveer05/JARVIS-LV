@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Karanveer Singh (https://github.com/Karanveer05)
+# Part of JARVIS-LV, licensed under CC BY-NC 4.0. See LICENSE and NOTICE.
 """
 ui_chat.py — the floating robot and the chat interface that opens from it.
 
@@ -1730,8 +1732,14 @@ class WelcomeCard(QWidget):
         s.setFont(_font(10))
         s.setAlignment(Qt.AlignmentFlag.AlignCenter)
         s.setStyleSheet(f"color:{P.DIM};background:transparent;")
+        credit = QLabel("JARVIS-LV · by Karanveer Singh")
+        credit.setFont(_font(8))
+        credit.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        credit.setStyleSheet(f"color:{P.DIM};background:transparent;")
         lay.addWidget(h)
         lay.addWidget(s)
+        lay.addSpacing(6)
+        lay.addWidget(credit)
 
 
 class SetupCard(QFrame):

@@ -1,0 +1,60 @@
+JARVIS-LV
+Copyright (c) 2026 Karanveer Singh (https://github.com/Karanveer05)
+
+This product is based on Mark LV by FatihMakes
+Copyright (c) 2026 FatihMakes (https://github.com/FatihMakes/Mark-LV)
+
+Licensed under CC BY-NC 4.0. See LICENSE for the full terms.
+
+-----------------------------------------------------------------------
+HOW TO CREDIT THIS PROJECT
+-----------------------------------------------------------------------
+
+If you share, fork, redistribute, demo or build on this project, put
+this credit somewhere people will see it (README, About screen, video
+description, report or similar):
+
+    JARVIS-LV by Karanveer Singh (https://github.com/Karanveer05/JARVIS-LV),
+    based on Mark LV by FatihMakes (https://github.com/FatihMakes/Mark-LV).
+    Licensed under CC BY-NC 4.0.
+
+Keep this NOTICE file and the LICENSE file with every copy, and say what
+you changed.
+
+-----------------------------------------------------------------------
+WORK BY KARANVEER SINGH (JARVIS-LV)
+-----------------------------------------------------------------------
+
+Everything below was added to or changed from Mark LV in JARVIS-LV:
+
+  - Offline assistant: rule-based fallback for when there is no internet
+    or every Gemini model is rate-limited, with Whisper/Vosk speech
+    (core/offline_assistant.py, core/offline_skills.py,
+    core/offline_voice.py, core/offline_history.py, open_close_apps.py)
+  - Floating robot and chat window, the default interface (ui_chat.py,
+    assets/)
+  - 21 extra tools: calculator, notes, timer, shell_command,
+    process_manager, system_toggles, spotify, powerpoint, image_generate,
+    logins (encrypted vault), clipboard_history, file_tools,
+    network_tools, screenshot, daily_briefing, everyday, site_to_file,
+    personality, lessons, routines, tool_builder
+  - Self-improvement switches: remembered facts, learned corrections,
+    noticed routines, tool building, approved package installs
+    (core/lessons.py, core/routines.py)
+  - Confirmation gate extended to stopping programs, non-read-only shell
+    commands, quitting and package installs
+  - English start-up greeting
+  - Portable one-file Windows installer (portable/)
+  - Tests (tests/)
+  - Project documentation (JARVIS-LV_Documentation_updated.pdf)
+
+-----------------------------------------------------------------------
+THIRD-PARTY MATERIAL
+-----------------------------------------------------------------------
+
+core/face_model.obj
+  MediaPipe canonical face model, https://github.com/google-ai-edge/mediapipe
+  Licensed under the Apache License 2.0. It is not covered by CC BY-NC 4.0.
+
+Python libraries listed in requirements.txt are installed separately and
+keep their own licenses.
